@@ -1,5 +1,5 @@
 ---
-title: "DAT7303_2414288_potfolio_3"
+title: "DAT7303_potfolio_3"
 Author: "Joseph Omenazu"
 output: html_document
 date: "2025-04-18"
