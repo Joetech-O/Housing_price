@@ -1,0 +1,351 @@
+---
+title: "DAT7303_2414288_potfolio_3"
+Author: "Joseph Omenazu"
+output: html_document
+date: "2025-04-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+Load Packages and Libraries
+```{r}
+install.packages("randomForest")
+install.packages("e1071")
+install.packages("xgboost")
+install.packages("rpart")
+install.packages("caret")
+install.packages("ggplot2")
+install.packages("Metrics")
+install.packages("pillar")
+install.packages("plotly")
+install.packages("skimr")
+```
+
+Load the dataset
+Display first few row
+
+```{r}
+df <- read.csv("/Users/mac/Downloads/Housing Data_Same Region.csv")
+head(df)
+
+```
+
+See columns 
+
+```{r}
+library(dplyr)
+glimpse(df)
+
+```
+
+Summary of the data
+```{r}
+summary(df)
+```
+
+
+Advance of data summary
+```{r}
+library(skimr)
+skim(df)
+```
+
+Check for duplicates
+
+```{r}
+duplicate <- duplicated(df)
+sum(duplicate)
+```
+
+Selecting only numerical values for correlation analysis
+
+```{r}
+library(reshape2)
+numeric_df <- df %>% select(where(is.numeric))
+# Compute correlation matrix
+cor_matrix <- cor(numeric_df, use = "complete.obs")
+
+# Melt the correlation matrix for ggplot
+melted_cor <- melt(cor_matrix)
+
+```
+
+Plot for correlations
+
+```{r}
+library(plotly)
+plot_ly(
+  x = colnames(cor_matrix),
+  y = rownames(cor_matrix),
+  z = cor_matrix,
+  type = "heatmap",
+  colors = colorRampPalette(c("red", "white", "blue"))(100)
+)
+```
+
+Dropping unnecessary columns and rows
+
+```{r}
+# Drop specified columns
+df <- df[, !(names(df) %in% c("PARCELNO", "LATITUDE", "LONGITUDE"))]
+
+# Drop rows with missing target
+df <- df[!is.na(df$SALE_PRC), ]
+```
+
+```{r}
+```
+
+```{r}
+skim(df)
+```
+
+
+
+Split and train dataset
+```{r}
+library(caret)
+# Split features and target
+X <- subset(df, select = -SALE_PRC)
+y <- df$SALE_PRC
+
+# Train-test split
+set.seed(123)
+train_idx <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_idx, ]
+X_test  <- X[-train_idx, ]
+y_train <- y[train_idx]
+y_test  <- y[-train_idx]
+```
+
+Standardization 
+```{r}
+# Standardize features
+preProc <- preProcess(X_train, method = c("center", "scale"))
+X_train_scaled <- predict(preProc, X_train)
+X_test_scaled <- predict(preProc, X_test)
+
+```
+
+
+
+
+Building models
+
+```{r}
+library(randomForest)
+library(e1071)
+library(xgboost)
+library(rpart)
+library(caret)
+# Models
+models <- list()
+
+# Random Forest
+models$RandomForest <- randomForest(x = X_train_scaled, y = y_train)
+
+# SVM
+models$SVM <- svm(x = X_train_scaled, y = y_train)
+
+# XGBoost
+dtrain <- xgb.DMatrix(data = as.matrix(X_train_scaled), label = y_train)
+models$XGBoost <- xgboost(data = dtrain, nrounds = 100, objective = "reg:squarederror", verbose = 0)
+
+# Decision Tree
+models$DecisionTree <- rpart(y_train ~ ., data = data.frame(X_train_scaled, y_train))
+
+# Linear Regression
+models$LinearRegression <- lm(y_train ~ ., data = data.frame(X_train_scaled, y_train))
+
+```
+
+Model Evaluation
+
+```{r}
+library(rpart)
+library(Metrics)
+
+# Evaluate models
+results <- data.frame(
+  Model = character(),
+  R2 = numeric(),
+  RMSE = numeric(),
+  MAE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (name in names(models)) {
+  model <- models[[name]]
+  if (name == "XGBoost") {
+    preds <- predict(model, as.matrix(X_test_scaled))
+  } else {
+    preds <- predict(model, newdata = X_test_scaled)
+  }
+  r2 <- R2(preds, y_test)
+  rmse_val <- rmse(y_test, preds)
+  mae_val <- mae(y_test, preds)
+  
+  results <- rbind(results, data.frame(Model = name, R2 = r2, RMSE = rmse_val, MAE = mae_val))
+}
+
+# View results
+print(results) 
+
+```
+
+Visualising Model errors
+
+```{r}
+library(ggplot2)
+# Plot RMSE and MAE comparison
+ggplot(results, aes(x = Model)) +
+  geom_bar(aes(y = RMSE, fill = "RMSE"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = MAE, fill = "MAE"), stat = "identity", position = "dodge") +
+  labs(title = "Model Error Metrics Comparison", y = "Error", fill = "Metric") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+
+
+
+
+```{r}
+library(tidyverse)
+library(caret)
+
+# Load the tuned model
+if (file.exists("xgb_model_tuned.rds")) {
+  cat("Loading saved tuned XGBoost model...\n")
+  xgb_model <- readRDS("xgb_model_tuned.rds")
+} else {
+  cat("Tuned model not found. Starting hyperparameter tuning...\n")
+
+  # Training control
+  control <- trainControl( 
+    method = "cv", 
+    number = 5,               
+    verboseIter = TRUE,
+    allowParallel = TRUE
+  )
+
+  # Hyperparameter grid
+  grid <- expand.grid(
+    nrounds = c(100, 200),
+    max_depth = c(3, 6, 9),
+    eta = c(0.01, 0.1, 0.3),
+    gamma = c(0, 1, 5),
+    colsample_bytree = c(0.6, 0.8, 1.0),
+    min_child_weight = c(1, 3, 5),
+    subsample = c(0.6, 0.8, 1.0)
+  )
+
+  # Train model
+  set.seed(123)
+  xgb_model <- train(
+    x = X_train_scaled,
+    y = y_train,
+    method = "xgbTree",
+    trControl = control,
+    tuneGrid = grid,
+    metric = "RMSE"
+  )
+
+  # Save model
+  saveRDS(xgb_model, "xgb_model_tuned.rds")
+  cat("Tuned model saved as 'xgb_model_tuned.rds'\n")
+}
+
+# Show best hyperparameters
+print(xgb_model$bestTune)
+
+```
+Predict Value
+
+```{r}
+library(tidyverse)
+# Predict and evaluate
+preds <- predict(xgb_model, newdata = X_test_scaled)
+
+# Evaluation
+r2 <- R2(preds, y_test)
+rmse_val <- rmse(y_test, preds)
+mae_val <- mae(y_test, preds)
+
+cat("Tuned XGBoost Results:\n")
+cat(paste("R2:", round(r2, 3), "\n"))
+cat(paste("RMSE:", round(rmse_val, 2), "\n"))
+cat(paste("MAE:", round(mae_val, 2), "\n"))
+```
+
+```{r}
+# Predict on New Data
+test_data <- data.frame(
+  LND_SQFOOT = 10000,
+  TOT_LVG_AREA = 2000,
+  SPEC_FEAT_VAL = 15000,
+  RAIL_DIST = 1000,
+  OCEAN_DIST = 11000,
+  WATER_DIST = 300,
+  CNTR_DIST = 43000,
+  SUBCNTR_DI = 37500,
+  HWY_DIST = 18000,
+  age = 60,
+  avno60plus = 0,
+  month_sold = 6,
+  structure_quality = 4
+)
+
+test_data_scaled <- predict(preProc, test_data)
+prediction <- predict(xgb_model, newdata = test_data_scaled)
+
+cat(paste0("Predicted House Price is :","$",round(prediction)))
+
+```
+
+
+```{r}
+# Predict on New Data
+test_data <- data.frame(
+  LND_SQFOOT = 12247,
+  TOT_LVG_AREA = 4552,
+  SPEC_FEAT_VAL = 3105,
+  RAIL_DIST = 4891.9,
+  OCEAN_DIST = 18507.2,
+  WATER_DIST = 375.8,
+  CNTR_DIST = 43897.9,
+  SUBCNTR_DI = 40115.7,
+  HWY_DIST = 49917.1,
+  age = 42,
+  avno60plus = 0,
+  month_sold = 7,
+  structure_quality = 5
+)
+
+test_data_scaled <- predict(preProc, test_data)
+prediction <- predict(xgb_model, newdata = test_data_scaled)
+
+cat(paste0("Predicted House Price is :","$",round(prediction)))
+
+```
+
+```{r}
+# Save the trained XGBoost model
+saveRDS(xgb_model, "xgb_model_tuned.rds")
+
+# Confirm the save
+cat("Model saved to your working directory as 'xgb_model_tuned.rds'\n")
+
+```
+```{r}
+getwd()
+```
+
+```{r}
+setwd("/Users/mac/Downloads")  # Adjust the path as needed
+saveRDS(xgb_model, "xgb_model_tuned.rds")
+```
+
