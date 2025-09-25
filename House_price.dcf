@@ -1,0 +1,12 @@
+name: House_price
+title: House_price
+username: joetech1
+account: joetech1
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15560179
+bundleId: 10951490
+url: https://joetech1.shinyapps.io/House_price/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
